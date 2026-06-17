@@ -1,0 +1,57 @@
+# ---- data, checkpoints, and run artifacts (never commit) ----
+data/
+checkpoints/
+outputs/
+logs/
+cache/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.faiss
+*.index
+*.npy
+*.npz
+
+# ---- FID / model weights ----
+*.bin
+fidnet*/
+*.tar
+*.tar.gz
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ---- tooling ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---- tensorboard ----
+runs/
+events.out.tfevents.*
+
+# ---- keep these (negated ignores) ----
+!requirements.txt
+!config.yaml

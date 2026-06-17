@@ -1,0 +1,46 @@
+# ============================================================================
+# requirements.txt — LLM-Guided Retrieval-Augmented Layout Generation (RGPO)
+# ----------------------------------------------------------------------------
+# Pinned to the versions the implementation was developed and audited against.
+# Heavy dependencies (torch, transformers, faiss, dreamsim) are imported lazily
+# inside the modules that use them, so the lightweight utilities and the unit
+# checks in AUDIT_LOG.md can be run CPU-only without installing the full stack.
+#
+# Install (GPU, recommended):   pip install -r requirements.txt
+# CPU-only smoke test:          pip install numpy pyyaml pillow scipy
+#
+# NOTE on PyTorch + FAISS: install the build that matches your CUDA toolkit.
+#   * GPU:  pip install torch --index-url https://download.pytorch.org/whl/cu121
+#           pip install faiss-gpu        (or conda install -c pytorch faiss-gpu)
+#   * CPU:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+#           pip install faiss-cpu
+# ============================================================================
+
+# ---- core numerics / IO (always needed) ----
+numpy>=1.24,<2.0
+PyYAML>=6.0
+Pillow>=10.0.0
+scipy>=1.11               # paired t-tests, Holm correction, linalg (significance)
+
+# ---- deep-learning backbone ----
+torch>=2.1,<2.4           # install the CUDA/CPU build matching your machine (see note)
+torchvision>=0.16
+transformers>=4.45.0      # Qwen2.5-VL-{7B,72B}-Instruct loading & generation
+peft>=0.11.0              # LoRA adapters (rank 64, alpha 128)
+accelerate>=0.30.0        # device_map / mixed-precision orchestration
+safetensors>=0.4.0        # checkpoint serialisation
+einops>=0.7.0             # tensor reshaping used by the VLM processor path
+
+# ---- retrieval ----
+# DreamSim perceptual embeddings + FAISS nearest-neighbour index.
+faiss-cpu>=1.7.4          # SWAP for faiss-gpu on a GPU box (do not install both)
+dreamsim>=0.2.0           # perceptual similarity for canvas retrieval
+timm>=0.9.0               # backbone weights pulled in by dreamsim
+
+# ---- evaluation / FID feature extractor ----
+# FIDNetV3 weights are loaded from a local checkpoint (see config: fid_checkpoint);
+# when unavailable the metric is reported N/A rather than fabricated.
+
+# ---- progress / logging (optional but used) ----
+tqdm>=4.66.0
+tensorboard>=2.14.0       # training curves via torch.utils.tensorboard

@@ -1,0 +1,157 @@
+# ============================================================================
+# config.yaml — LLM-Guided Retrieval-Augmented Layout Generation (RGPO)
+# ----------------------------------------------------------------------------
+# Single source of run configuration for all 10 src/ modules. Every MANDATORY
+# key the code reads is present here; the rgpo: block (read with .get defaults)
+# is included explicitly so the A/B/C experiment is reproducible.
+#
+# IMPORTANT conventions (read before changing geometry):
+#   * dataset.canvas_size and dataset.original_poster_size are BOTH [H, W]
+#     (height first), because the loader unpacks `orig_h, orig_w = size`.
+#   * Pixel-coordinate annotations are normalised by these; getting H/W back=
+#     wards horizontally compresses / vertically clips every box. See the note
+#     on original_poster_size below.
+# ============================================================================
+
+paths:
+  cgl_root: ./data/CGL-Dataset-v2
+  pku_root: ./data/PKU-PosterLayout
+  ralf_splits_dir: ./data/ralf_splits
+  ralf_retrieval_dir: ./data/ralf_retrieval
+  output_dir: ./outputs
+  checkpoint_dir: ./checkpoints
+  log_dir: ./logs
+  cache_dir: ./cache
+
+dataset:
+  name: pku                      # 'pku' or 'cgl' (override with --dataset)
+  max_elements: 10
+  num_bins: 128
+  quantization: linear           # 'linear' or 'kmeans'
+  canvas_size: [512, 512]        # [H, W] the canvas is resized to for the model
+  # [H, W] of the ORIGINAL posters, used to normalise any pixel-coordinate
+  # annotations. PKU PosterLayout canvases are 513 wide x 750 tall (portrait),
+  # so as [H, W] this MUST be [750, 513]. (The previous [513, 750] was H/W-
+  # swapped and would distort every pixel-coord box; RALF normalised splits are
+  # unaffected, but we set the correct orientation regardless.)
+  # For CGL set the CGL poster [H, W] when using pixel-coord annotations.
+  original_poster_size: [750, 513]
+  categories:
+    cgl: [logo, text, underlay, embellishment]
+    pku: [logo, text, underlay]
+  var_order: [category, center_x, center_y, width, height]
+  sort_by: label                 # canonical SERIALISATION order (not agreement)
+  filter_min_area: 0.001
+  filter_max_elements: 11
+
+retrieval:
+  num_neighbors: 16              # K retrieved; in-prompt count is capped below
+  similarity_model: dreamsim     # dreamsim | clip | dinov2 | saliency
+  dreamsim_dim: 1792
+  index_type: faiss_ivf
+  use_precomputed_index: true    # use RALF's precomputed DreamSim indices
+  exclude_self: true             # NEVER let a query retrieve itself (honored)
+  layout_format: json
+  max_retrieved_in_prompt: 4     # exemplars actually shown to the model
+  include_saliency_description: true
+  use_mmr: false                 # optional MMR diversification of neighbours
+  mmr_lambda: 0.7
+
+model:
+  mllm_backbone: Qwen/Qwen2.5-VL-7B-Instruct
+  torch_dtype: bfloat16
+  device_map: auto
+  lora:
+    rank: 64
+    alpha: 128
+    dropout: 0.05
+    target_modules: [q_proj, v_proj]
+    bias: none
+    task_type: CAUSAL_LM
+  max_new_tokens: 1024
+  layout_representation: json
+  use_cot_reasoning: true
+  cot_stages: [canvas_analysis, reference_examination, placement_reasoning, layout_output]
+  freeze_vision_encoder: true
+  image_min_pixels: 784
+  image_max_pixels: 401408
+
+train_sft:
+  epochs: 15
+  batch_size: 8                  # NOTE: the SFT loop is per-sample with gradient
+                                 # accumulation; the EFFECTIVE batch is
+                                 # gradient_accumulation_steps. batch_size is
+                                 # retained for documentation/DataLoader use and
+                                 # is NOT used to size the LR schedule.
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-05
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  lr_scheduler: cosine
+  save_every_n_epochs: 3
+  eval_every_n_epochs: 1
+  seed: 42                       # --seed overrides; checkpoints are seed-scoped
+  mixed_precision: bf16
+
+train_dpo:                       # Stage-2 (retrieval-grounded) ALIGNMENT params
+  epochs: 5
+  batch_size: 4
+  gradient_accumulation_steps: 4
+  learning_rate: 5.0e-06
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  lr_scheduler: cosine
+  seed: 42
+  mixed_precision: bf16
+  beta: 0.1
+  margin_type: dynamic           # 'dynamic' -> DMPO f(delta)=2 sinh(delta); 'fixed' -> DPO
+  num_candidates_per_canvas: 8   # N candidates sampled per canvas for pairing
+  num_preference_pairs: 50000    # target pair count (large; full-scale run)
+  temperature_sampling: 0.9      # candidate sampling temperature
+  top_p_sampling: 0.95
+  min_margin: 1.0e-3             # drop pairs whose normalised delta < this
+  # max_pairs_per_canvas: null   # optional cap; default floor(N/2) best-vs-worst
+  scorer_weights:                # SOURCE A only: the 5-term composite reward.
+    alpha_occ: 1.0               # span = sum(alpha) = 3.8 (delta normaliser)
+    alpha_rea: 1.0
+    alpha_und: 1.0
+    alpha_ove: 0.5
+    alpha_align: 0.3
+
+# ----------------------------------------------------------------------------
+# RGPO — the contribution's configuration (read by rgpo.py / preferences.py).
+# This block selects and parameterises the PREFERENCE SOURCE, the single point
+# at which the A/B/C arms diverge. Everything else (loss, optimiser, sampler) is
+# identical across arms, which is what makes the head-to-head a clean control.
+# ----------------------------------------------------------------------------
+rgpo:
+  pref_source: B                 # A=learned reward (baseline) | B=RGPO (ours) | C=hybrid
+                                 # CLI --pref-source overrides this.
+  grid_resolution: 16            # G for the GxG occupancy grid (source B spatial term)
+  w_spatial: 1.0                 # weight on occupancy-grid divergence (source B)
+  w_structural: 1.0              # weight on per-category structural mismatch (source B)
+  rgpo_weight: 0.5               # lambda for source C: (1-lam)*A_hat + lam*B_hat
+
+evaluation:
+  metrics: [fid, occ, rea, und, ove, max_iou]
+  num_trials: 3                  # eval trials per seed (averaged within a seed)
+  fid_feature_extractor: fidnetv3
+  fid_num_samples: 1000          # FID needs samples >> feature_dim(256) for stability
+  fid_checkpoint: null           # path to FIDNetV3 weights; null -> FID reported N/A
+  use_aesthetic_winrate: true
+  judge_model: Qwen/Qwen2.5-VL-72B-Instruct
+  judge_model_secondary: null    # set a DIFFERENT-family judge to get Cohen's kappa
+  constrained_tasks: [unconstrained, c_to_sp, cs_to_p, completion, refinement, relationship]
+  refinement_noise_mean: 0.0
+  refinement_noise_std: 0.01
+  relationship_sample_ratio: 0.1
+
+inference:
+  num_samples_per_canvas: 5
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: true
+  visualize: true
+  save_dir: ./outputs/visualizations
