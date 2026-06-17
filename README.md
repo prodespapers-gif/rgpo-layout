@@ -257,7 +257,7 @@ If you use this code, please cite the paper:
   title   = {LLM-Guided Retrieval-Augmented Layout Generation for
              Content-Aware Poster Design},
   author  = {Zhou, You and Chen, Yu and Peng, Lang},
-  journal = Waiting acceptance,
+  journal = Waiting for acceptance,
   year    = {2026},
   note    = {Retrieval-Grounded Preference Optimization (RGPO)}
 }
